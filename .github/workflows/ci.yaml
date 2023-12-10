@@ -1,0 +1,7 @@
+name: DenoKVTest
+on:
+  push:
+
+jobs:
+  denokvtest:
+    uses: sgohlke/workflows/.github/workflows/deno.yml@main
