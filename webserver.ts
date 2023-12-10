@@ -24,7 +24,7 @@ export async function createNewLuckyNumber() {
    }
 }
 
-Deno.cron("Create new lucky number", "* * * * *", async () => {
+Deno.cron("Create new lucky number", "0 0 * * *", async () => {
    await createNewLuckyNumber()
 });
 
