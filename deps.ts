@@ -1,7 +1,7 @@
 export {
    assertEquals,
    assertStringIncludes,
-   fail
+   fail,
 } from 'https://raw.githubusercontent.com/sgohlke/deno-deps/main/deps.ts'
 
 export {

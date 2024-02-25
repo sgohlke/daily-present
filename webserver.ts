@@ -10,23 +10,36 @@ function generateRandomNumber() {
    return Math.floor(randomNumber)
 }
 
-export async function createNewLuckyNumber() {
+export async function createNewLuckyNumber(
+   writeLuckyNumberToDbFunction: (
+      newNumber: string,
+   ) => Promise<Deno.KvCommitResult> = async function (newNumber: string) {
+      const kv = await getKv()
+      return await kv.set([LUCKY_NUMBER_TABLE], newNumber)
+   },
+): Promise<string> {
    let newLuckyNumber = ''
    for (let index = 0; index < 10; index++) {
       newLuckyNumber += generateRandomNumber()
    }
-   const kv = await getKv()
-   const result = await kv.set([LUCKY_NUMBER_TABLE], newLuckyNumber)
-   if (result.ok) {
+
+   try {
+      await writeLuckyNumberToDbFunction(newLuckyNumber)
       console.log('Written new lucky number to database', newLuckyNumber)
-   } else {
-      console.error('Cannot write new lucky number to database', newLuckyNumber)
+      return newLuckyNumber
+   } catch (error) {
+      console.error(
+         'Cannot write new lucky number to database',
+         newLuckyNumber,
+         error,
+      )
+      return ''
    }
 }
 
-Deno.cron("Create new lucky number", "0 0 * * *", async () => {
-   await createNewLuckyNumber()
-});
+Deno.cron('Create new lucky number', '0 0 * * *', async () => {
+   setCurrentLuckyNumber(await createNewLuckyNumber())
+})
 
 export async function getKv() {
    if (!kvInstance) {
@@ -57,7 +70,7 @@ function handleRequest(request: Request): Response {
       // Serve webpage
       responseHeaders.set('content-type', 'text/html; charset=UTF-8')
       return new Response(
-      `
+         `
       <!DOCTYPE html>
       <html lang="en">
       <head>
@@ -73,7 +86,9 @@ function handleRequest(request: Request): Response {
       </section>
       <section>
       <h1>Today's lucky number is:</h1>
-      <span id='luckyNumber'><b>${currentLuckyNumber || 'Not yet selected!'}</b></span>
+      <span id='luckyNumber'><b>${
+            getCurrentLuckyNumber() || 'Not yet selected!'
+         }</b></span>
       </section>
       </body>
       </html>
@@ -90,20 +105,36 @@ function handleRequest(request: Request): Response {
    )
 }
 
-export function startDailyPresentServer(
+async function initLuckyNumber() {
+   const kv = await getKv()
+   const maybeLuckyNumber = await kv.get<string>([
+      LUCKY_NUMBER_TABLE,
+   ])
+   if (maybeLuckyNumber && maybeLuckyNumber.value) {
+      console.log('Lucky number already exists.', maybeLuckyNumber)
+      setCurrentLuckyNumber(maybeLuckyNumber.value)
+   } else {
+      console.log('Lucky number does not exists yet. Creating new one!')
+      setCurrentLuckyNumber(await createNewLuckyNumber())
+   }
+}
+
+export async function startDailyPresentServer(
    options: Deno.ServeOptions | Deno.ServeTlsOptions,
-): Deno.HttpServer {
+): Promise<Deno.HttpServer> {
+   // Init lucky number
+   await initLuckyNumber()
    return Deno.serve(options, handleRequest)
 }
 
 export async function listenToLuckyNumberChanges() {
    //Register watch to listen to value changes
    const kv = await getKv()
-   const stream = kv.watch<Array<string>>([[LUCKY_NUMBER_TABLE]]);
+   const stream = kv.watch<Array<string>>([[LUCKY_NUMBER_TABLE]])
    for await (const entries of stream) {
       console.log('luckynumber changed', entries)
       if (entries[0].value) {
-         currentLuckyNumber = entries[0].value
+         setCurrentLuckyNumber(entries[0].value)
       }
    }
 }

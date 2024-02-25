@@ -1,75 +1,82 @@
-import { 
-   assertEquals, 
-   assertStringIncludes,
-   fail
-} from './deps.ts'
-import { 
-   LUCKY_NUMBER_TABLE, 
+import { assertEquals, assertStringIncludes } from './deps.ts'
+import {
    createNewLuckyNumber,
-   getCurrentLuckyNumber, 
-   getKv,  
-   setCurrentLuckyNumber,  
-   startDailyPresentServer 
+   getCurrentLuckyNumber,
+   getKv,
+   LUCKY_NUMBER_TABLE,
+   setCurrentLuckyNumber,
+   startDailyPresentServer,
 } from './webserver.ts'
 
 Deno.test('Calling startDailyPresentServer should return expected result', async () => {
-   await deleteExistingLuckyNumberInDatabase()
-   const kv = await getKv()
-   
-   // Start webserver
    const abortController = new AbortController()
+   const kv = await getKv()
+
+   // Start webserver
    const server = await startDailyPresentServer({
       port: 7035,
       signal: abortController.signal,
    })
 
-   //Test currentLuckyNumber before ChangeListener is active 
-   assertEquals(getCurrentLuckyNumber(), '' )
+   try {
+      await deleteExistingLuckyNumberInDatabase()
 
-   // Test page without available lucky number
-   let response = await fetch('http://localhost:7035/')
-   assertEquals(response.status, 200)
-   let responseAsText = await response.text()
-   assertStringIncludes(responseAsText, 'Polly Warmheart')
-   assertStringIncludes(responseAsText, 'Not yet selected!')
+      //Test currentLuckyNumber before ChangeListener is active
+      const currentLuckyNumber = getCurrentLuckyNumber()
+      assertEquals(currentLuckyNumber.length, 10)
 
-   // Simulate cronjob by generating new lucky number
-   await createNewLuckyNumber()
-   const newLuckyNumber = await kv.get<string>([LUCKY_NUMBER_TABLE])
-   if (newLuckyNumber.value) {
-      setCurrentLuckyNumber(newLuckyNumber.value)
-      assertEquals(newLuckyNumber.value, getCurrentLuckyNumber() )
-   } else {
-      fail('Should find newly create lucky number in database but did not!')
+      // Test page without available lucky number
+      let response = await fetch('http://localhost:7035/')
+      assertEquals(response.status, 200)
+      let responseAsText = await response.text()
+      assertStringIncludes(responseAsText, 'Polly Warmheart')
+      assertStringIncludes(responseAsText, currentLuckyNumber)
+
+      // Simulate cronjob by generating new lucky number
+
+      const newLuckyNumber = await createNewLuckyNumber()
+      setCurrentLuckyNumber(newLuckyNumber)
+      assertEquals(newLuckyNumber, getCurrentLuckyNumber())
+
+      // Test page with available lucky number
+      response = await fetch('http://localhost:7035/')
+      assertEquals(response.status, 200)
+      responseAsText = await response.text()
+      assertStringIncludes(responseAsText, 'Polly Warmheart')
+      assertStringIncludes(responseAsText, getCurrentLuckyNumber())
+
+      // Test OPTION request
+      response = await fetch('http://localhost:7035/', {
+         method: 'OPTIONS',
+         headers: { 'Origin': 'test' },
+      })
+      assertEquals(response.status, 200)
+      assertEquals(response.headers.get('Access-Control-Allow-Origin'), 'test')
+      const responseText = await response.text()
+      assertEquals(responseText, '')
+
+      // Test non available route
+      response = await fetch('http://localhost:7035/doesnotexist')
+      assertEquals(response.status, 404)
+      const responseAsJson = await response.json()
+      assertEquals(responseAsJson.error, 'Not found: /doesnotexist')
+   } catch (error) {
+      console.log('Error in test', error)
+      throw error
+   } finally {
+      abortController.abort()
+      await server.finished
+      await kv.close()
    }
-  
-   // Test page with available lucky number
-   response = await fetch('http://localhost:7035/')
-   assertEquals(response.status, 200)
-   responseAsText = await response.text()
-   assertStringIncludes(responseAsText, 'Polly Warmheart')
-   assertStringIncludes(responseAsText, getCurrentLuckyNumber())
+})
 
-   // Test OPTION request
-   response = await fetch('http://localhost:7035/', {
-      method: 'OPTIONS',
-      headers: { 'Origin': 'test' },
-   })
-   assertEquals(response.status, 200)
-   assertEquals(response.headers.get('Access-Control-Allow-Origin'), 'test')
-   const responseText = await response.text()
-   assertEquals(responseText, '')
-
-   // Test non available route
-   response = await fetch('http://localhost:7035/doesnotexist')
-   assertEquals(response.status, 404)
-   const responseAsJson = await response.json()
-   assertEquals(responseAsJson.error, 'Not found: /doesnotexist')
-
-   abortController.abort()
-   await server.finished
-   
-   await kv.close()
+Deno.test('CreateNewLuckyNumber should return empty string if new number cannot be stored in DB', async () => {
+   const result = await createNewLuckyNumber(
+      () => {
+         throw new Error('A test error')
+      },
+   )
+   assertEquals(result, '')
 })
 
 async function deleteExistingLuckyNumberInDatabase() {
