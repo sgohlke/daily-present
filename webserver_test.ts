@@ -1,4 +1,4 @@
-import { assertEquals, assertStringIncludes } from './deps.ts'
+import { assertEquals, assertStringIncludes } from './dev_deps.ts'
 import {
    createNewLuckyNumber,
    getCurrentLuckyNumber,
